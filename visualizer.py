@@ -169,8 +169,7 @@ def draw_search_animation(network, stats, output_path: str = "search_animation.p
         steps = [(frozenset([stats.origin_id]), frozenset(),
                   f"Recurso na origem: {stats.origin_id}")]
 
-    # Limita a 12 painéis para não ficar imenso
-    steps = steps[:12]
+    steps = steps[:]
     n = len(steps)
     cols = min(n, 4)
     rows = (n + cols - 1) // cols

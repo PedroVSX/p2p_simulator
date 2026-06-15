@@ -37,7 +37,7 @@ resources:
   n3: r4, r22, r24
   n4: r3, r14, r19
   n5: r1
-  n6: r7
+  n6: r7, r10
   n7: r17
   n8: r1, r7, r18
   n9: r18, r21, r23
