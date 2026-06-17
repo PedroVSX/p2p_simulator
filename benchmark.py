@@ -6,9 +6,33 @@ especialmente o random_walk que varia a cada execução.
 """
 
 import copy
+import random
 import statistics
 from network import Network
 from search import ALGORITHMS
+
+
+def _get_all_resources(network: Network) -> set:
+    all_res = set()
+    for node in network.nodes.values():
+        all_res.update(node.resources)
+    return all_res
+
+
+def _pick_random_search(network: Network):
+    """Retorna (origin_id, resource_id) aleatórios onde a origem não tem o recurso."""
+    all_res = list(_get_all_resources(network))
+    if not all_res:
+        return None, None
+
+    # Tenta 100 vezes encontrar uma combinação válida
+    for _ in range(100):
+        res = random.choice(all_res)
+        potential_origins = [node_id for node_id, node in network.nodes.items()
+                            if res not in node.resources]
+        if potential_origins:
+            return random.choice(potential_origins), res
+    return None, None
 
 
 def _fresh_network(network: Network) -> Network:
@@ -30,56 +54,76 @@ def _fresh_network(network: Network) -> Network:
 
 
 def run_benchmark(network: Network, origin_id: str, resource_id: str,
-                  ttl: int, rounds: int = 20, silent: bool = True) -> dict:
+                  ttl: int, rounds: int = 20, silent: bool = True,
+                  sequential: bool = False) -> dict:
     """
     Executa `rounds` rodadas para cada algoritmo e retorna um dicionário
     com as estatísticas agregadas.
 
     Parâmetros:
         network     — rede P2P já validada
-        origin_id   — nó de origem da busca
-        resource_id — recurso buscado
+        origin_id   — nó de origem da busca (ou None para aleatório)
+        resource_id — recurso buscado (ou None para aleatório)
         ttl         — TTL da busca
         rounds      — número de execuções por algoritmo (padrão: 20)
         silent      — se True, suprime a saída detalhada de cada busca
+        sequential  — se True, NÃO reseta o cache entre as rodadas do mesmo algoritmo.
+                       Útil para ver o efeito dos algoritmos informados acumulando cache.
 
     Retorno:
         {
-          "flooding": {
-              "rounds": 20,
-              "found": 20,
-              "success_rate": 100.0,
-              "min_msgs": 12,
-              "max_msgs": 12,
-              "avg_msgs": 12.0,
-              "median_msgs": 12.0,
-              "min_nodes": 8,
-              "max_nodes": 8,
-              "avg_nodes": 8.0,
-          },
+          "flooding": { ... },
           ...
         }
     """
     results = {}
+
+    # Se origem ou recurso não informados, usaremos buscas variadas a cada rodada
+    random_mode = (origin_id is None or resource_id is None)
+
+    # Pré-gera as buscas para que todos os algoritmos testem os mesmos cenários
+    search_scenarios = []
+    if random_mode:
+        for _ in range(rounds):
+            o, r = _pick_random_search(network)
+            search_scenarios.append((o, r))
+    else:
+        search_scenarios = [(origin_id, resource_id)] * rounds
 
     for algo_name, algo_func in ALGORITHMS.items():
         msgs_list  = []
         nodes_list = []
         found_count = 0
 
-        for _ in range(rounds):
-            net_copy = _fresh_network(network)
+        # Para cada algoritmo, começamos com uma rede zerada.
+        # Se for sequencial, usaremos ESSA MESMA instância em todas as rodadas do algoritmo.
+        net_instance = _fresh_network(network)
+
+        for i in range(rounds):
+            o_round, r_round = search_scenarios[i]
+            if not o_round or not r_round:
+                continue
+
+            if sequential:
+                current_net = net_instance
+            else:
+                current_net = _fresh_network(network)
 
             # Suprime print_summary durante o benchmark
             if silent:
-                stats = _run_silent(algo_func, net_copy, origin_id, resource_id, ttl)
+                stats = _run_silent(algo_func, net_instance if sequential else current_net,
+                                    o_round, r_round, ttl)
             else:
-                stats = algo_func(net_copy, origin_id, resource_id, ttl)
+                stats = algo_func(net_instance if sequential else current_net,
+                                  o_round, r_round, ttl)
 
             msgs_list.append(stats.message_count)
             nodes_list.append(len(stats.nodes_visited))
             if stats.found:
                 found_count += 1
+
+        if not msgs_list:
+            continue
 
         results[algo_name] = {
             "rounds":       rounds,
@@ -114,8 +158,11 @@ def print_benchmark(results: dict, origin_id: str, resource_id: str, ttl: int):
     thin = "─" * 90
     rounds = next(iter(results.values()))["rounds"]
 
+    res_str = resource_id if resource_id else "Vários (Aleatório)"
+    ori_str = origin_id if origin_id else "Vários (Aleatório)"
+
     print(f"\n{sep}")
-    print(f"  BENCHMARK  —  recurso={resource_id}  origem={origin_id}  "
+    print(f"  BENCHMARK  —  recurso={res_str}  origem={ori_str}  "
           f"TTL={ttl}  rodadas={rounds}")
     print(thin)
 
@@ -158,8 +205,12 @@ def plot_benchmark(results: dict, origin_id: str, resource_id: str,
     width = 0.25
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+    res_str = resource_id if resource_id else "Vários (Aleatório)"
+    ori_str = origin_id if origin_id else "Vários (Aleatório)"
+
     fig.suptitle(
-        f"Benchmark — recurso={resource_id}  origem={origin_id}  "
+        f"Benchmark — recurso={res_str}  origem={ori_str}  "
         f"TTL={ttl}  ({rounds} rodadas por algoritmo)",
         fontsize=12, fontweight="bold"
     )
@@ -189,6 +240,7 @@ def plot_benchmark(results: dict, origin_id: str, resource_id: str,
     ax2.set_title("Taxa de sucesso (%)", fontsize=11)
     ax2.set_ylabel("% de buscas que encontraram o recurso")
     ax2.set_ylim(0, 115)
+    ax2.set_xticks(range(len(algos)))
     ax2.set_xticklabels(algos, rotation=15, ha="right", fontsize=9)
     ax2.grid(axis="y", linestyle="--", alpha=0.4)
 
