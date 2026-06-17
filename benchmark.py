@@ -136,6 +136,8 @@ def run_benchmark(network: Network, origin_id: str, resource_id: str,
             "min_nodes":    min(nodes_list),
             "max_nodes":    max(nodes_list),
             "avg_nodes":    round(statistics.mean(nodes_list), 1),
+            "raw_msgs":     msgs_list,
+            "raw_nodes":    nodes_list,
         }
 
     return results
@@ -162,8 +164,8 @@ def print_benchmark(results: dict, origin_id: str, resource_id: str, ttl: int):
     ori_str = origin_id if origin_id else "Vários (Aleatório)"
 
     print(f"\n{sep}")
-    print(f"  BENCHMARK  —  recurso={res_str}  origem={ori_str}  "
-          f"TTL={ttl}  rodadas={rounds}")
+    print(f"  BENCHMARK — TTL={ttl}  rodadas={rounds}")
+    print(f"  (recurso={res_str}  origem={ori_str})")
     print(thin)
 
     header = (f"  {'Algoritmo':<25} {'Sucesso':>8} "
@@ -184,7 +186,7 @@ def print_benchmark(results: dict, origin_id: str, resource_id: str, ttl: int):
 
 
 def plot_benchmark(results: dict, origin_id: str, resource_id: str,
-                   ttl: int, output_path: str = "benchmark.png"):
+                   ttl: int, config_name: str = "", output_path: str = "benchmark.png"):
     """
     Gera um gráfico de barras comparando min/média/max de mensagens
     entre os algoritmos.
@@ -208,10 +210,11 @@ def plot_benchmark(results: dict, origin_id: str, resource_id: str,
 
     res_str = resource_id if resource_id else "Vários (Aleatório)"
     ori_str = origin_id if origin_id else "Vários (Aleatório)"
+    conf_str = f" perfil={config_name}" if config_name else ""
 
     fig.suptitle(
-        f"Benchmark — recurso={res_str}  origem={ori_str}  "
-        f"TTL={ttl}  ({rounds} rodadas por algoritmo)",
+        f"Benchmark — {conf_str}  TTL={ttl}  ({rounds} rodadas)\n"
+        f"recurso={res_str}  origem={ori_str}",
         fontsize=12, fontweight="bold"
     )
 
@@ -252,3 +255,223 @@ def plot_benchmark(results: dict, origin_id: str, resource_id: str,
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"  Gráfico do benchmark salvo em: {output_path}")
+
+
+def plot_histogram(results: dict, origin_id: str, resource_id: str,
+                   ttl: int, config_name: str = "", output_path: str = "histogram.png"):
+    """
+    Gera um histograma da distribuição de mensagens para cada algoritmo.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import math
+
+    algos = list(results.keys())
+    num_algos = len(algos)
+    
+    # Define layout da grade (ex: 2x2 para 4 algoritmos)
+    cols = 2
+    rows = math.ceil(num_algos / cols)
+
+    fig, axes = plt.subplots(rows, cols, figsize=(12, 4 * rows), squeeze=False)
+    
+    res_str = resource_id if resource_id else "Vários (Aleatório)"
+    conf_str = f" perfil={config_name}" if config_name else ""
+    
+    fig.suptitle(
+        f"Distribuição de Mensagens — {conf_str}  TTL={ttl}\n"
+        f"recurso={res_str}  ({results[algos[0]]['rounds']} rodadas)",
+        fontsize=14, fontweight="bold"
+    )
+
+    colors = ["#3498DB", "#E74C3C", "#2ECC71", "#F39C12", "#9B59B6"]
+
+    for i, algo in enumerate(algos):
+        r = i // cols
+        c = i % cols
+        ax = axes[r][c]
+        
+        data = results[algo]["raw_msgs"]
+        color = colors[i % len(colors)]
+        
+        ax.hist(data, bins=15, color=color, alpha=0.7, edgecolor='black')
+        ax.set_title(f"Algoritmo: {algo}", fontsize=12, color=color, fontweight="bold")
+        ax.set_xlabel("Número de mensagens")
+        ax.set_ylabel("Frequência (rodadas)")
+        ax.grid(axis='y', linestyle='--', alpha=0.3)
+        
+        # Adiciona linha da média
+        avg = results[algo]["avg_msgs"]
+        ax.axvline(avg, color='black', linestyle='dashed', linewidth=1.5, label=f"Média: {avg}")
+        ax.legend(fontsize=8)
+
+    # Remove eixos vazios se houver
+    for i in range(num_algos, rows * cols):
+        fig.delaxes(axes[i // cols][i % cols])
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.93])
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Histograma do benchmark salvo em: {output_path}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ANÁLISE MESTRA (Análise Comparativa Profunda)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def run_full_analysis(rounds: int = 30, seed: int = 42):
+    """
+    Executa uma análise profunda cobrindo todos os perfis e múltiplos TTLs.
+    Gera vários gráficos comparativos em out/analysis/.
+    """
+    import os
+    import numpy as np
+    
+    output_dir = "out/analysis"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    random.seed(seed)
+    # Tenta importar numpy aqui para garantir que está disponível
+    try:
+        import numpy as np
+        np.random.seed(seed)
+    except ImportError:
+        pass
+
+    profiles = {
+        "leve":   "config/leve.yaml",
+        "medio":  "config/medio.yaml",
+        "pesado": "config/pesado.yaml"
+    }
+    ttls = [2, 4, 6, 8]
+    
+    # data[perfil][ttl][algo] = {stats}
+    data_independent = {}
+    data_sequential = {}
+
+    print(f"\nIniciando Análise Mestra ({rounds} rodadas por cenário)...")
+
+    for profile_name, path in profiles.items():
+        print(f"  Processando perfil: {profile_name.upper()}")
+        network = Network.from_file(path)
+        data_independent[profile_name] = {}
+        data_sequential[profile_name] = {}
+        
+        for ttl in ttls:
+            print(f"    - TTL {ttl} ", end="", flush=True)
+            res_indep = run_benchmark(network, None, None, ttl, rounds, silent=True, sequential=False)
+            data_independent[profile_name][ttl] = res_indep
+            print("(Indep) ", end="", flush=True)
+            
+            res_seq = run_benchmark(network, None, None, ttl, rounds, silent=True, sequential=True)
+            data_sequential[profile_name][ttl] = res_seq
+            print("(Seq) ✔")
+
+    print("\nGerando gráficos de análise...")
+    _plot_success_rate_vs_ttl(data_independent, ttls, "medio", f"{output_dir}/1_sucesso_vs_ttl.png")
+    _plot_scalability(data_independent, 6, ["leve", "medio", "pesado"], [20, 100, 1000], f"{output_dir}/2_escalabilidade.png")
+    _plot_cache_impact(data_independent, data_sequential, "medio", 6, f"{output_dir}/3_impacto_cache.png")
+    _plot_ttl_vs_messages(data_independent, ttls, f"{output_dir}/4_ttl_impacto_mensagens.png")
+    _plot_algorithm_comparison_by_network(data_independent, 6, ["leve", "medio", "pesado"], f"{output_dir}/5_comparativo_redes.png")
+
+    print(f"\nAnálise completa! Gráficos salvos em: {output_dir}/")
+
+
+# --- Funções Internas de Plotagem da Análise ---
+
+def _get_algo_color(algo_name):
+    colors = {
+        "flooding": "#3498DB",
+        "informed_flooding": "#E74C3C",
+        "random_walk": "#2ECC71",
+        "informed_random_walk": "#F39C12"
+    }
+    return colors.get(algo_name, "#95A5A6")
+
+def _plot_success_rate_vs_ttl(data, ttls, profile, output_path):
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 6))
+    algos = list(data[profile][ttls[0]].keys())
+    for algo in algos:
+        rates = [data[profile][t][algo]["success_rate"] for t in ttls]
+        plt.plot(ttls, rates, marker='o', label=algo, color=_get_algo_color(algo))
+    plt.title(f"Taxa de Sucesso vs TTL (Rede {profile.capitalize()})", fontweight="bold")
+    plt.xlabel("TTL")
+    plt.ylabel("Taxa de Sucesso (%)")
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+def _plot_scalability(data, ttl, profiles, sizes, output_path):
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 6))
+    algos = list(data["leve"][ttl].keys())
+    for algo in algos:
+        msgs = [data[p][ttl][algo]["avg_msgs"] for p in profiles]
+        plt.plot(sizes, msgs, marker='s', label=algo, color=_get_algo_color(algo))
+    plt.xscale('log')
+    plt.title(f"Escalabilidade: Mensagens vs Tamanho da Rede (TTL={ttl})", fontweight="bold")
+    plt.xlabel("Número de Nós (escala log)")
+    plt.ylabel("Média de Mensagens")
+    plt.grid(True, which="both", linestyle='--', alpha=0.6)
+    plt.legend()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+def _plot_cache_impact(data_ind, data_seq, profile, ttl, output_path):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    algos = ["informed_flooding", "informed_random_walk"]
+    ind_vals = [data_ind[profile][ttl][a]["avg_msgs"] for a in algos]
+    seq_vals = [data_seq[profile][ttl][a]["avg_msgs"] for a in algos]
+    x = np.arange(len(algos))
+    width = 0.35
+    plt.figure(figsize=(10, 6))
+    plt.bar(x - width/2, ind_vals, width, label='Independente (Sem Cache)', color='#BDC3C7')
+    plt.bar(x + width/2, seq_vals, width, label='Sequencial (Com Cache)', color='#3498DB')
+    plt.title(f"Impacto do Cache: Independente vs Sequencial ({profile.capitalize()}, TTL={ttl})", fontweight="bold")
+    plt.xticks(x, algos)
+    plt.ylabel("Média de Mensagens")
+    plt.legend()
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+def _plot_ttl_vs_messages(data, ttls, output_path):
+    import matplotlib.pyplot as plt
+    profiles = list(data.keys())
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    for i, p in enumerate(profiles):
+        algos = list(data[p][ttls[0]].keys())
+        for algo in algos:
+            msgs = [data[p][t][algo]["avg_msgs"] for t in ttls]
+            axes[i].plot(ttls, msgs, marker='o', label=algo, color=_get_algo_color(algo))
+        axes[i].set_title(f"Rede {p.capitalize()}")
+        axes[i].set_xlabel("TTL")
+        axes[i].set_ylabel("Média de Mensagens")
+        axes[i].grid(True, alpha=0.3)
+        if i == 2: axes[i].legend()
+    plt.suptitle("Impacto do TTL no Nº de Mensagens por Tipo de Rede", fontsize=14, fontweight="bold")
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+def _plot_algorithm_comparison_by_network(data, ttl, profiles, output_path):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    algos = list(data["leve"][ttl].keys())
+    x = np.arange(len(algos))
+    width = 0.25
+    plt.figure(figsize=(12, 6))
+    for i, p in enumerate(profiles):
+        vals = [data[p][ttl][a]["avg_msgs"] for a in algos]
+        plt.bar(x + (i-1)*width, vals, width, label=f"Rede {p.capitalize()}")
+    plt.title(f"Mensagens Trocadas por Algoritmo nas Diferentes Redes (TTL={ttl})", fontweight="bold")
+    plt.xticks(x, algos)
+    plt.ylabel("Média de Mensagens")
+    plt.legend()
+    plt.grid(axis='y', linestyle='--', alpha=0.4)
+    plt.savefig(output_path, dpi=150)
+    plt.close()
