@@ -30,6 +30,8 @@ def _build_graph(network) -> nx.Graph:
                 G.add_edge(node_id, neighbor_id)
     return G
 
+def _get_layout(G):
+    return nx.circular_layout(G, scale=5)
 
 def draw_network(network, output_path: str = "network.png"):
     """
@@ -37,18 +39,26 @@ def draw_network(network, output_path: str = "network.png"):
     Cada nó exibe seu ID e seus recursos.
     """
     G = _build_graph(network)
-    pos = nx.spring_layout(G, seed=42, k=2.5)
+    pos = _get_layout(G)
 
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(16, 12))
     ax.set_title("Topologia da Rede P2P", fontsize=16, fontweight="bold", pad=20)
-    ax.axis("off")
+    ax.margins(0.25)
 
     # Arestas
-    nx.draw_networkx_edges(G, pos, ax=ax, edge_color=C_EDGE, width=2, alpha=0.7)
+    nx.draw_networkx_edges(
+        G,
+        pos,
+        ax=ax,
+        edge_color=C_EDGE,
+        width=2,
+        alpha=0.7,
+        connectionstyle="arc3,rad=0.12"
+    )
 
     # Nós
     nx.draw_networkx_nodes(G, pos, ax=ax,
-                           node_color=C_DEFAULT, node_size=1800, alpha=0.95)
+                           node_color=C_DEFAULT, node_size=1400, alpha=0.95)
 
     # Labels: ID + recursos
     labels = {}
@@ -72,7 +82,7 @@ def draw_search(network, stats, output_path: str = "search.png"):
       - Vermelho (arestas) → caminho percorrido
     """
     G = _build_graph(network)
-    pos = nx.spring_layout(G, seed=42, k=2.5)
+    pos = _get_layout(G)
 
     # Classifica cada nó
     node_colors = []
@@ -104,7 +114,7 @@ def draw_search(network, stats, output_path: str = "search.png"):
             edge_colors.append(C_EDGE)
             edge_widths.append(1.5)
 
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(16, 12))
     found_str = f"encontrado em {stats.found_at}" if stats.found else "NÃO encontrado"
     ax.set_title(
         f"Busca: recurso={stats.resource_id}  origem={stats.origin_id}  "
@@ -114,11 +124,19 @@ def draw_search(network, stats, output_path: str = "search.png"):
         fontsize=11, fontweight="bold", pad=15
     )
     ax.axis("off")
+    ax.margins(0.25)
 
-    nx.draw_networkx_edges(G, pos, ax=ax,
-                           edge_color=edge_colors, width=edge_widths, alpha=0.8)
+    nx.draw_networkx_edges(
+        G,
+        pos,
+        ax=ax,
+        edge_color=edge_colors,
+        width=edge_widths,
+        alpha=0.8,
+        connectionstyle="arc3,rad=0.12"
+    )
     nx.draw_networkx_nodes(G, pos, ax=ax,
-                           node_color=node_colors, node_size=1800, alpha=0.95)
+                           node_color=node_colors, node_size=1400, alpha=0.95)
 
     labels = {nid: nid for nid in G.nodes()}
     nx.draw_networkx_labels(G, pos, labels=labels, ax=ax, font_size=9, font_weight="bold")
@@ -145,7 +163,7 @@ def draw_search_animation_multipanel(network, stats, output_path: str = "search_
     reconstruindo o estado da rede a cada mensagem trocada.
     """
     G = _build_graph(network)
-    pos = nx.spring_layout(G, seed=42, k=2.5)
+    pos = _get_layout(G)
 
     # Extrai os passos do log (apenas mensagens de BUSCA, não RESP)
     steps = []
@@ -215,8 +233,15 @@ def draw_search_animation_multipanel(network, stats, output_path: str = "search_
                 edge_colors.append(C_EDGE)
                 edge_widths.append(1)
 
-        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors,
-                               width=edge_widths, alpha=0.7)
+        nx.draw_networkx_edges(
+            G,
+            pos,
+            ax=ax,
+            edge_color=edge_colors,
+            width=edge_widths,
+            alpha=0.7,
+            connectionstyle="arc3,rad=0.12"
+        )
         nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors,
                                node_size=600, alpha=0.95)
         nx.draw_networkx_labels(G, pos, ax=ax, font_size=7, font_weight="bold")
@@ -244,7 +269,7 @@ def draw_search_animation_gif(network, stats, output_path: str = "search_animati
             animação "pausar" no resultado final antes de reiniciar o loop.
     """
     G = _build_graph(network)
-    pos = nx.spring_layout(G, seed=42, k=2.5)
+    pos = _get_layout(G)
 
     # Extrai os passos do log (apenas mensagens de BUSCA, não RESP)
     steps = []
@@ -306,8 +331,15 @@ def draw_search_animation_gif(network, stats, output_path: str = "search_animati
                 edge_colors.append(C_EDGE)
                 edge_widths.append(1)
 
-        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors,
-                               width=edge_widths, alpha=0.7)
+        nx.draw_networkx_edges(
+            G,
+            pos,
+            ax=ax,
+            edge_color=edge_colors,
+            width=edge_widths,
+            alpha=0.7,
+            connectionstyle="arc3,rad=0.12"
+        )
         nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors,
                                node_size=600, alpha=0.95)
         nx.draw_networkx_labels(G, pos, ax=ax, font_size=8, font_weight="bold")

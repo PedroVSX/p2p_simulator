@@ -27,11 +27,14 @@ def flooding(network, origin_id: str, resource_id: str, ttl: int) -> SearchStats
     search_id = str(uuid.uuid4())
     stats = SearchStats(search_id, resource_id, origin_id, "flooding", ttl)
 
+    # Conjunto de (node_id, search_id) já processados — evita loops
     seen: set[str] = set()
 
+    # Fila: (mensagem, nó_atual)
     queue = deque()
     origin_node = network.nodes[origin_id]
 
+    # O nó de origem já verifica seus próprios recursos
     seen.add(origin_id)
     if origin_node.has_resource(resource_id):
         stats.record_found(origin_id, [origin_id])
@@ -39,6 +42,7 @@ def flooding(network, origin_id: str, resource_id: str, ttl: int) -> SearchStats
         stats.print_summary()
         return stats
 
+    # Envia para todos os vizinhos da origem
     initial_msg = Message(search_id, resource_id, ttl, origin_id, "flooding")
     for neighbor_id in origin_node.neighbors:
         msg = initial_msg.hop(neighbor_id)
@@ -56,11 +60,14 @@ def flooding(network, origin_id: str, resource_id: str, ttl: int) -> SearchStats
 
         if current_node.has_resource(resource_id):
             stats.record_found(current_id, msg.path)
+            # Mensagem de retorno até a origem
             _send_reply(msg.path, stats, "RESP")
+            break
 
         if msg.ttl <= 0:
             continue
 
+        # Propaga para todos os vizinhos ainda não visitados
         for neighbor_id in current_node.neighbors:
             if neighbor_id not in seen:
                 next_msg = msg.hop(neighbor_id)
@@ -147,6 +154,27 @@ def informed_flooding(network, origin_id: str, resource_id: str, ttl: int) -> Se
 
 
 # ──────────────────────────────────────────────
+# HELPER: escolha do próximo salto no random walk
+# ──────────────────────────────────────────────
+
+def _pick_next_hop(current_node, previous_id: str | None) -> str:
+    """
+    Escolhe aleatoriamente o próximo vizinho, evitando voltar
+    imediatamente para o nó anterior (previous_id), exceto quando
+    esse for o único vizinho disponível.
+
+    Isso evita o problema de "ping-pong" entre dois nós
+    (ex: n10 → n4 → n10 → n4 → ...), que desperdiça saltos do TTL
+    sem explorar novas partes da rede.
+    """
+    candidates = [n for n in current_node.neighbors if n != previous_id]
+    if not candidates:
+        # Único vizinho é justamente quem mandou a mensagem — não há escolha
+        candidates = current_node.neighbors
+    return random.choice(candidates)
+
+
+# ──────────────────────────────────────────────
 # RANDOM WALK
 # ──────────────────────────────────────────────
 
@@ -168,13 +196,15 @@ def random_walk(network, origin_id: str, resource_id: str, ttl: int) -> SearchSt
 
     msg = Message(search_id, resource_id, ttl, origin_id, "random_walk")
     current_id = origin_id
+    previous_id = None   # nó de onde a mensagem acabou de vir
 
     while msg.ttl > 0:
         current_node = network.nodes[current_id]
-        # Escolhe um vizinho aleatório (pode revisitar nós — é intencional no random walk)
-        next_id = random.choice(current_node.neighbors)
+        # Escolhe um vizinho aleatório, evitando voltar para o nó anterior
+        next_id = _pick_next_hop(current_node, previous_id)
         msg = msg.hop(next_id)
         stats.record_message(current_id, next_id, msg.ttl)
+        previous_id = current_id
         current_id = next_id
 
         next_node = network.nodes[current_id]
@@ -193,61 +223,52 @@ def random_walk(network, origin_id: str, resource_id: str, ttl: int) -> SearchSt
 
 def informed_random_walk(network, origin_id: str, resource_id: str, ttl: int) -> SearchStats:
     """
-    Passeio aleatório com cache e consulta de vizinhança (1-hop):
-    Antes de dar um passo aleatório, o nó pergunta aos vizinhos se algum 
-    tem o recurso ou o cache. Se sim, ele vai direto para o alvo.
+    Passeio aleatório com cache: igual ao random_walk, mas cada nó
+    consultado verifica seu cache antes de continuar o passeio.
     """
     search_id = str(uuid.uuid4())
     stats = SearchStats(search_id, resource_id, origin_id, "informed_random_walk", ttl)
 
     origin_node = network.nodes[origin_id]
 
-    # 1. Verifica a própria origem
-    if origin_node.has_resource(resource_id):
-        stats.record_found(origin_id, [origin_id])
-        return stats
     if origin_node.knows_location(resource_id):
         found_at = origin_node.cache[resource_id]
         stats.record_found(found_at, [origin_id, f"(cache→{found_at})"])
+        stats.log.append(f"  [---] Cache hit na origem {origin_id}: recurso está em {found_at}")
+        stats.print_summary()
+        return stats
+
+    if origin_node.has_resource(resource_id):
+        stats.record_found(origin_id, [origin_id])
+        stats.print_summary()
         return stats
 
     msg = Message(search_id, resource_id, ttl, origin_id, "informed_random_walk")
     current_id = origin_id
+    previous_id = None   # nó de onde a mensagem acabou de vir
 
     while msg.ttl > 0:
         current_node = network.nodes[current_id]
-        target_id = None
+        next_id = _pick_next_hop(current_node, previous_id)
+        msg = msg.hop(next_id)
+        stats.record_message(current_id, next_id, msg.ttl)
+        previous_id = current_id
+        current_id = next_id
 
-        # 2. INTELIGÊNCIA: Verifica se algum vizinho tem o recurso ou cache
-        for neighbor_id in current_node.neighbors:
-            neighbor_node = network.nodes[neighbor_id]
-            if neighbor_node.has_resource(resource_id):
-                target_id = neighbor_id
-                break
-            if neighbor_node.knows_location(resource_id):
-                target_id = neighbor_id
-                break
-        
-        # 3. Se não encontrou nada nos vizinhos, escolhe um aleatório
-        if not target_id:
-            target_id = random.choice(current_node.neighbors)
-        
-        # Realiza o movimento
-        msg = msg.hop(target_id)
-        stats.record_message(current_id, target_id, msg.ttl)
-        current_id = target_id
-        current_node = network.nodes[current_id]
+        next_node = network.nodes[current_id]
 
-        if current_node.has_resource(resource_id):
-            stats.record_found(current_id, msg.path)
-            _update_cache_along_path(network, msg.path, resource_id, current_id)
+        # Cache hit
+        if next_node.knows_location(resource_id):
+            found_at = next_node.cache[resource_id]
+            stats.record_found(found_at, msg.path + [f"(cache→{found_at})"])
+            stats.log.append(f"  [---] Cache hit em {current_id}: recurso está em {found_at}")
+            _update_cache_along_path(network, msg.path, resource_id, found_at)
             _send_reply(msg.path, stats, "RESP")
             break
-        
-        if current_node.knows_location(resource_id):
-            found_at = current_node.cache[resource_id]
-            stats.record_found(found_at, msg.path + [f"(cache→{found_at})"])
-            _update_cache_along_path(network, msg.path, resource_id, found_at)
+
+        if next_node.has_resource(resource_id):
+            stats.record_found(current_id, msg.path)
+            _update_cache_along_path(network, msg.path, resource_id, current_id)
             _send_reply(msg.path, stats, "RESP")
             break
 
