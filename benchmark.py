@@ -360,10 +360,13 @@ def run_full_analysis(rounds: int = 30, seed: int = 42):
         
         for ttl in ttls:
             print(f"    - TTL {ttl} ", end="", flush=True)
+            
+            random.seed(seed)
             res_indep = run_benchmark(network, None, None, ttl, rounds, silent=True, sequential=False)
             data_independent[profile_name][ttl] = res_indep
             print("(Indep) ", end="", flush=True)
             
+            random.seed(seed)
             res_seq = run_benchmark(network, None, None, ttl, rounds, silent=True, sequential=True)
             data_sequential[profile_name][ttl] = res_seq
             print("(Seq) ✔")
