@@ -27,14 +27,11 @@ def flooding(network, origin_id: str, resource_id: str, ttl: int) -> SearchStats
     search_id = str(uuid.uuid4())
     stats = SearchStats(search_id, resource_id, origin_id, "flooding", ttl)
 
-    # Conjunto de (node_id, search_id) já processados — evita loops
     seen: set[str] = set()
 
-    # Fila: (mensagem, nó_atual)
     queue = deque()
     origin_node = network.nodes[origin_id]
 
-    # O nó de origem já verifica seus próprios recursos
     seen.add(origin_id)
     if origin_node.has_resource(resource_id):
         stats.record_found(origin_id, [origin_id])
@@ -42,7 +39,6 @@ def flooding(network, origin_id: str, resource_id: str, ttl: int) -> SearchStats
         stats.print_summary()
         return stats
 
-    # Envia para todos os vizinhos da origem
     initial_msg = Message(search_id, resource_id, ttl, origin_id, "flooding")
     for neighbor_id in origin_node.neighbors:
         msg = initial_msg.hop(neighbor_id)
@@ -60,14 +56,11 @@ def flooding(network, origin_id: str, resource_id: str, ttl: int) -> SearchStats
 
         if current_node.has_resource(resource_id):
             stats.record_found(current_id, msg.path)
-            # Mensagem de retorno até a origem
             _send_reply(msg.path, stats, "RESP")
-            break
 
         if msg.ttl <= 0:
             continue
 
-        # Propaga para todos os vizinhos ainda não visitados
         for neighbor_id in current_node.neighbors:
             if neighbor_id not in seen:
                 next_msg = msg.hop(neighbor_id)
