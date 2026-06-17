@@ -36,11 +36,13 @@ def gerar_config_p2p(filename, num_nodes, min_neighbors, max_neighbors):
 
     # Conexões extras respeitando o limite
     grau_nos = {f"n{i}": 2 for i in range(1, num_nodes + 1)}
-    for i in range(1, num_nodes + 1):
-        no_atual = f"n{i}"
+    lista_nos = [f"n{i}" for i in range(1, num_nodes + 1)]
+
+    # Garantir que todos os nós alcancem pelo menos min_neighbors
+    for no_atual in lista_nos:
         tentativas = 0
-        while grau_nos[no_atual] < max_neighbors and tentativas < 10:
-            alvo = f"n{random.randint(1, num_nodes)}"
+        while grau_nos[no_atual] < min_neighbors and tentativas < 100:
+            alvo = random.choice(lista_nos)
             if no_atual != alvo and grau_nos[alvo] < max_neighbors:
                 edge = sorted([no_atual, alvo])
                 if FlowList(edge) not in config["edges"]:
@@ -56,6 +58,6 @@ def gerar_config_p2p(filename, num_nodes, min_neighbors, max_neighbors):
 
 
 # Gerar os 3 arquivos corrigidos
-gerar_config_p2p("config/config_leve.yaml", num_nodes=20, min_neighbors=2, max_neighbors=3)
-gerar_config_p2p("config/config_medio.yaml", num_nodes=100, min_neighbors=5, max_neighbors=10)
-gerar_config_p2p("config/config_pesado.yaml", num_nodes=1000, min_neighbors=8, max_neighbors=15)
+gerar_config_p2p("config/leve.yaml", num_nodes=20, min_neighbors=2, max_neighbors=3)
+gerar_config_p2p("config/medio.yaml", num_nodes=100, min_neighbors=5, max_neighbors=10)
+gerar_config_p2p("config/pesado.yaml", num_nodes=1000, min_neighbors=8, max_neighbors=15)
