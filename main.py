@@ -3,25 +3,20 @@ main.py — Ponto de entrada do simulador P2P.
 
 Uso:
     # Modo interativo (menu):
-    python main.py config.yaml
+    python main.py default.yaml
 
     # Busca direta:
-    python main.py config.yaml --node n1 --resource r10 --ttl 6 --algo flooding
+    python main.py default.yaml --node n1 --resource r10 --ttl 6 --algo flooding
+
+    # Análise Mestra (gera gráficos comparativos de todas as redes):
+    # (Não exige arquivo de configuração como argumento)
+    python main.py --analyze --rounds 30
 
     # Comparar todos os algoritmos (uma rodada):
-    python main.py config.yaml --node n1 --resource r10 --ttl 6 --compare
+    python main.py default.yaml --node n1 --resource r10 --ttl 6 --compare
 
-    # Benchmark estatístico (N rodadas, min/max/média):
-    python main.py config.yaml --node n1 --resource r10 --ttl 6 --benchmark --rounds 30
-
-    # Gerar gráfico da topologia da rede:
-    python main.py config.yaml --draw-network
-
-    # Busca + gráfico do resultado + animação:
-    python main.py config.yaml --node n1 --resource r10 --ttl 6 --algo flooding --draw-search
-
-    # Tudo junto (benchmark + gráficos):
-    python main.py config.yaml --node n1 --resource r10 --ttl 6 --benchmark --draw-network
+    # Benchmark estatístico (N rodadas):
+    python main.py default.yaml --node n1 --resource r10 --ttl 6 --benchmark --rounds 30
 """
 
 import argparse
@@ -64,9 +59,9 @@ def run_interactive(net: Network):
         stats = ALGORITHMS[algo](net, node_id, resource_id, ttl)
 
         if draw:
-            from visualizer import draw_search, draw_search_animation
-            draw_search(net, stats, output_path=f"busca_{algo}_{resource_id}.png")
-            draw_search_animation(net, stats, output_path=f"animacao_{algo}_{resource_id}.png")
+            from visualizer import draw_search, draw_search_animation_gif
+            draw_search(net, stats, output_path=f"out/busca_{algo}_{resource_id}.png")
+            draw_search_animation_gif(net, stats, output_path=f"out/animacao_{algo}_{resource_id}.gif")
         print()
 
 
@@ -90,7 +85,7 @@ def run_compare(net: Network, node_id: str, resource_id: str, ttl: int):
 
 def main():
     parser = argparse.ArgumentParser(description="Simulador de busca em redes P2P")
-    parser.add_argument("config", help="Arquivo YAML de configuração da rede")
+    parser.add_argument("config", nargs='?', help="Arquivo YAML de configuração da rede (opcional se usar --analyze)")
     parser.add_argument("--node",     help="Nó de origem da busca")
     parser.add_argument("--resource", help="Recurso a buscar")
     parser.add_argument("--ttl",      type=int, help="TTL da busca")
@@ -102,14 +97,38 @@ def main():
                         help="Benchmark estatístico: N rodadas por algoritmo")
     parser.add_argument("--rounds",       type=int, default=20,
                         help="Número de rodadas para o benchmark (padrão: 20)")
+    parser.add_argument("--sequential",   action="store_true",
+                        help="No benchmark, mantém o cache entre rodadas (testa efeito acumulado)")
+    parser.add_argument("--analyze",      action="store_true",
+                        help="Executa a análise mestra (gráficos comparativos de todas as redes)")
     parser.add_argument("--draw-network", action="store_true",
                         help="Gera gráfico PNG da topologia da rede")
     parser.add_argument("--draw-search",  action="store_true",
                         help="Gera gráfico PNG do resultado da busca + animação multi-painel")
+    parser.add_argument("--seed",         type=int, help="Semente para o gerador de números aleatórios")
 
     args = parser.parse_args()
 
+    # ── Análise Mestra ───────────────────────────────────
+    # Se pedir análise, não precisamos carregar a config agora
+    if args.analyze:
+        from benchmark import run_full_analysis
+        run_full_analysis(rounds=args.rounds, seed=args.seed or 42)
+        return
+
     # ── Carrega e valida ──────────────────────────────────
+    if not args.config:
+        print("Erro: Informe o arquivo de configuração (.yaml) ou use --analyze.")
+        parser.print_help()
+        sys.exit(1)
+
+    # ── Configura Semente ────────────────────────────────
+    if args.seed is not None:
+        import random
+        import numpy as np
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+
     try:
         net = Network.from_file(args.config)
     except FileNotFoundError:
@@ -128,20 +147,31 @@ def main():
     # ── Gráfico da rede ───────────────────────────────────
     if args.draw_network:
         from visualizer import draw_network
-        draw_network(net, output_path="network.png")
+        draw_network(net, output_path="out/network.png")
 
     # ── Benchmark ────────────────────────────────────────
     if args.benchmark:
-        if not all([args.node, args.resource, args.ttl]):
-            print("Para --benchmark, informe também --node, --resource e --ttl.")
+        if not args.ttl:
+            print("Para --benchmark, informe pelo menos o --ttl.")
             sys.exit(1)
-        from benchmark import run_benchmark, print_benchmark, plot_benchmark
-        print(f"\n  Rodando benchmark ({args.rounds} rodadas por algoritmo)...")
+        from benchmark import run_benchmark, print_benchmark, plot_benchmark, plot_histogram
+        import os
+        config_name = os.path.splitext(os.path.basename(args.config))[0]
+        
+        mode_str = "SEQUENCIAL" if args.sequential else "INDEPENDENTE"
+        print(f"\n  Rodando benchmark {mode_str} ({args.rounds} rodadas por algoritmo)...")
         results = run_benchmark(net, args.node, args.resource, args.ttl,
-                                rounds=args.rounds, silent=True)
+                                rounds=args.rounds, silent=True,
+                                sequential=args.sequential)
         print_benchmark(results, args.node, args.resource, args.ttl)
-        plot_benchmark(results, args.node, args.resource, args.ttl,
-                       output_path="benchmark.png")
+        
+        output_plot = f"out/benchmark/benchmark_{config_name}_ttl{args.ttl}.png"
+        plot_benchmark(results, args.node, args.resource, args.ttl, config_name=config_name,
+                       output_path=output_plot)
+        
+        output_hist = f"out/benchmark/histogram_{config_name}_ttl{args.ttl}.png"
+        plot_histogram(results, args.node, args.resource, args.ttl, config_name=config_name,
+                       output_path=output_hist)
         return
 
     # ── Comparar (1 rodada) ───────────────────────────────
@@ -162,11 +192,11 @@ def main():
         stats = ALGORITHMS[args.algo](net, args.node, args.resource, args.ttl)
 
         if args.draw_search:
-            from visualizer import draw_search, draw_search_animation
+            from visualizer import draw_search, draw_search_animation_gif
             draw_search(net, stats,
-                        output_path=f"busca_{args.algo}_{args.resource}.png")
-            draw_search_animation(net, stats,
-                                  output_path=f"animacao_{args.algo}_{args.resource}.png")
+                        output_path=f"out/busca_{args.algo}_{args.resource}.png")
+            draw_search_animation_gif(net, stats,
+                                  output_path=f"out/animacao_{args.algo}_{args.resource}.gif")
         return
 
     # ── Modo interativo ───────────────────────────────────

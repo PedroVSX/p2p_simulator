@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use("Agg")   # backend sem janela — gera arquivos PNG
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.animation as animation
 import networkx as nx
 
 # Paleta de cores
@@ -138,8 +139,7 @@ def draw_search(network, stats, output_path: str = "search.png"):
     plt.close()
     print(f"  Gráfico da busca salvo em: {output_path}")
 
-
-def draw_search_animation(network, stats, output_path: str = "search_animation.png"):
+def draw_search_animation_multipanel(network, stats, output_path: str = "search_animation.png"):
     """
     Gera um PNG multi-painel mostrando o progresso passo a passo da busca,
     reconstruindo o estado da rede a cada mensagem trocada.
@@ -229,3 +229,91 @@ def draw_search_animation(network, stats, output_path: str = "search_animation.p
     plt.savefig(output_path, dpi=130, bbox_inches="tight")
     plt.close()
     print(f"  Animação (multi-painel) salva em: {output_path}")
+
+
+def draw_search_animation_gif(network, stats, output_path: str = "search_animation.gif",
+                              fps: float = 1.5, dpi: int = 130,
+                              hold_last_frames: int = 3):
+    """
+    Gera um GIF animado mostrando o progresso passo a passo da busca,
+    reconstruindo o estado da rede a cada mensagem trocada.
+
+    Parâmetros extras em relação à versão multi-painel:
+        fps: quadros por segundo (controla a velocidade da animação).
+        hold_last_frames: quantas vezes repetir o último quadro, para a
+            animação "pausar" no resultado final antes de reiniciar o loop.
+    """
+    G = _build_graph(network)
+    pos = nx.spring_layout(G, seed=42, k=2.5)
+
+    # Extrai os passos do log (apenas mensagens de BUSCA, não RESP)
+    steps = []
+    active_nodes: set[str] = {stats.origin_id}
+    active_edges: set[tuple] = set()
+
+    for entry in stats.log:
+        if "BUSCA:" in entry:
+            # Formato: "  [NNN] BUSCA: nX → nY  (TTL=Z)"
+            parts = entry.split("BUSCA:")[1].strip().split("→")
+            if len(parts) == 2:
+                sender = parts[0].strip()
+                receiver = parts[1].split("(")[0].strip()
+                active_nodes.add(receiver)
+                active_edges.add((sender, receiver))
+                steps.append((frozenset(active_nodes), frozenset(active_edges),
+                              f"Passo {len(steps) + 1}: {sender} → {receiver}"))
+
+    if not steps:
+        # Recurso na própria origem — só um quadro
+        steps = [(frozenset([stats.origin_id]), frozenset(),
+                  f"Recurso na origem: {stats.origin_id}")]
+
+    # Repete o último estado algumas vezes para "pausar" no resultado final
+    if hold_last_frames > 1:
+        steps = steps + [steps[-1]] * (hold_last_frames - 1)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    fig.suptitle(
+        f"Animação da Busca — recurso={stats.resource_id}  "
+        f"origem={stats.origin_id}  algo={stats.algo}",
+        fontsize=12, fontweight="bold"
+    )
+
+    def render_frame(idx):
+        vis_nodes, vis_edges, title = steps[idx]
+        ax.clear()
+        ax.set_title(title, fontsize=10, pad=8)
+        ax.axis("off")
+
+        node_colors = []
+        for nid in G.nodes():
+            if stats.found and nid == stats.found_at and nid in vis_nodes:
+                node_colors.append(C_FOUND)
+            elif nid == stats.origin_id:
+                node_colors.append(C_ORIGIN)
+            elif nid in vis_nodes:
+                node_colors.append(C_VISITED)
+            else:
+                node_colors.append(C_DEFAULT)
+
+        edge_colors = []
+        edge_widths = []
+        for u, v in G.edges():
+            if (u, v) in vis_edges or (v, u) in vis_edges:
+                edge_colors.append(C_ACTIVE)
+                edge_widths.append(3)
+            else:
+                edge_colors.append(C_EDGE)
+                edge_widths.append(1)
+
+        nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors,
+                               width=edge_widths, alpha=0.7)
+        nx.draw_networkx_nodes(G, pos, ax=ax, node_color=node_colors,
+                               node_size=600, alpha=0.95)
+        nx.draw_networkx_labels(G, pos, ax=ax, font_size=8, font_weight="bold")
+
+    anim = animation.FuncAnimation(fig, render_frame, frames=len(steps))
+    anim.save(output_path, writer=animation.PillowWriter(fps=fps), dpi=dpi)
+    plt.close(fig)
+
+    print(f"  Animação (GIF) salva em: {output_path}")
