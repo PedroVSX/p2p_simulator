@@ -163,7 +163,7 @@ def main():
         results = run_benchmark(net, args.node, args.resource, args.ttl,
                                 rounds=args.rounds, silent=True,
                                 sequential=args.sequential)
-        print_benchmark(results, args.node, args.resource, args.ttl, config_name=config_name)
+        print_benchmark(results, args.node, args.resource, args.ttl)
         
         output_plot = f"out/benchmark/benchmark_{config_name}_ttl{args.ttl}.png"
         plot_benchmark(results, args.node, args.resource, args.ttl, config_name=config_name,
